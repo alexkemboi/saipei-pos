@@ -1,0 +1,870 @@
+// SAIPEI FOODS LIMITED - ERP / POS data model
+// Target: Microsoft SQL Server
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+}
+
+// ---------------------------------------------------------------------------
+// ADMINISTRATION - users, roles, permissions, audit
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          String           @id @default(uuid()) @db.UniqueIdentifier
+  name        String           @unique @db.NVarChar(80)
+  description String?          @db.NVarChar(255)
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       User[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id     String           @id @default(uuid()) @db.UniqueIdentifier
+  code   String           @unique @db.NVarChar(80) // e.g. "pos.sell", "import.approve"
+  module String           @db.NVarChar(60)
+  label  String           @db.NVarChar(140)
+  roles  RolePermission[]
+}
+
+model RolePermission {
+  roleId       String     @db.UniqueIdentifier
+  permissionId String     @db.UniqueIdentifier
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.UniqueIdentifier
+  email        String    @unique @db.NVarChar(160)
+  username     String    @unique @db.NVarChar(60)
+  fullName     String    @db.NVarChar(140)
+  phone        String?   @db.NVarChar(30)
+  passwordHash String    @db.NVarChar(200)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  roleId       String    @db.UniqueIdentifier
+  role         Role      @relation(fields: [roleId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  branchId     String?   @db.UniqueIdentifier
+  branch       Branch?   @relation(fields: [branchId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  auditLogs      AuditLog[]
+  sales          Sale[]
+  cashSessions   CashSession[]
+  approvals      Approval[]        @relation("ApprovalActor")
+  stockMovements StockMovement[]
+  expenses       Expense[]
+  payments       Payment[]
+  receipts       Receipt[]
+  stockTakes     StockTake[]
+  adjustments    StockAdjustment[]
+  transfersFrom  StockTransfer[]   @relation("TransferCreatedBy")
+
+  @@index([roleId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.UniqueIdentifier
+  userId    String?  @db.UniqueIdentifier
+  user      User?    @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  action    String   @db.NVarChar(60) // CREATE | UPDATE | DELETE | APPROVE | VOID | LOGIN
+  entity    String   @db.NVarChar(80)
+  entityId  String?  @db.NVarChar(80)
+  summary   String?  @db.NVarChar(400)
+  metadata  String?  @db.NVarChar(Max)
+  ipAddress String?  @db.NVarChar(60)
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model Setting {
+  key       String   @id @db.NVarChar(80)
+  value     String   @db.NVarChar(Max)
+  group     String   @default("general") @db.NVarChar(40)
+  updatedAt DateTime @updatedAt
+}
+
+model Branch {
+  id         String      @id @default(uuid()) @db.UniqueIdentifier
+  code       String      @unique @db.NVarChar(20)
+  name       String      @db.NVarChar(120)
+  location   String?     @db.NVarChar(200)
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  users      User[]
+  warehouses Warehouse[]
+  sales      Sale[]
+}
+
+// ---------------------------------------------------------------------------
+// APPROVALS - shared workflow across modules
+// ---------------------------------------------------------------------------
+
+model Approval {
+  id          String    @id @default(uuid()) @db.UniqueIdentifier
+  entity      String    @db.NVarChar(80) // PurchaseOrder | Expense | StockAdjustment ...
+  entityId    String    @db.NVarChar(80)
+  reference   String?   @db.NVarChar(80)
+  status      String    @default("PENDING") @db.NVarChar(30)
+  requestedBy String?   @db.NVarChar(140)
+  actorId     String?   @db.UniqueIdentifier
+  actor       User?     @relation("ApprovalActor", fields: [actorId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  notes       String?   @db.NVarChar(400)
+  amount      Decimal?  @db.Decimal(18, 2)
+  createdAt   DateTime  @default(now())
+  decidedAt   DateTime?
+
+  @@index([entity, entityId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// PURCHASING - suppliers, orders, invoices, payments, returns
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id          String   @id @default(uuid()) @db.UniqueIdentifier
+  code        String   @unique @db.NVarChar(30)
+  name        String   @db.NVarChar(160)
+  type        String   @default("FOREIGN") @db.NVarChar(30)
+  country     String?  @db.NVarChar(80)
+  contactName String?  @db.NVarChar(120)
+  phone       String?  @db.NVarChar(40)
+  email       String?  @db.NVarChar(160)
+  address     String?  @db.NVarChar(300)
+  taxPin      String?  @db.NVarChar(40)
+  currency    String   @default("USD") @db.NVarChar(3)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+  invoices       SupplierInvoice[]
+  payments       Payment[]
+  importOrders   ImportOrder[]
+  returns        PurchaseReturn[]
+}
+
+model PurchaseOrder {
+  id           String    @id @default(uuid()) @db.UniqueIdentifier
+  reference    String    @unique @db.NVarChar(40) // LPO reference
+  supplierId   String    @db.UniqueIdentifier
+  supplier     Supplier  @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  orderDate    DateTime  @default(now())
+  expectedDate DateTime?
+  currency     String    @default("USD") @db.NVarChar(3)
+  exchangeRate Decimal   @default(1) @db.Decimal(18, 6)
+  subtotal     Decimal   @default(0) @db.Decimal(18, 2)
+  taxAmount    Decimal   @default(0) @db.Decimal(18, 2)
+  total        Decimal   @default(0) @db.Decimal(18, 2)
+  status       String    @default("DRAFT") @db.NVarChar(30)
+  notes        String?   @db.NVarChar(600)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  lines       PurchaseOrderLine[]
+  invoices    SupplierInvoice[]
+  importOrders ImportOrder[]
+
+  @@index([supplierId])
+  @@index([status])
+}
+
+model PurchaseOrderLine {
+  id              String        @id @default(uuid()) @db.UniqueIdentifier
+  purchaseOrderId String        @db.UniqueIdentifier
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String?       @db.UniqueIdentifier
+  product         Product?      @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  description     String        @db.NVarChar(300)
+  quantity        Decimal       @db.Decimal(18, 3)
+  receivedQty     Decimal       @default(0) @db.Decimal(18, 3)
+  unitPrice       Decimal       @db.Decimal(18, 4)
+  lineTotal       Decimal       @db.Decimal(18, 2)
+
+  @@index([purchaseOrderId])
+}
+
+model SupplierInvoice {
+  id              String         @id @default(uuid()) @db.UniqueIdentifier
+  invoiceNumber   String         @db.NVarChar(60)
+  supplierId      String         @db.UniqueIdentifier
+  supplier        Supplier       @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  purchaseOrderId String?        @db.UniqueIdentifier
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  invoiceDate     DateTime       @default(now())
+  dueDate         DateTime?
+  currency        String         @default("USD") @db.NVarChar(3)
+  exchangeRate    Decimal        @default(1) @db.Decimal(18, 6)
+  amount          Decimal        @db.Decimal(18, 2)
+  amountPaid      Decimal        @default(0) @db.Decimal(18, 2)
+  isFinal         Boolean        @default(false) // final invoice received before shipping
+  status          String         @default("UNPAID") @db.NVarChar(30)
+  documentUrl     String?        @db.NVarChar(400)
+  notes           String?        @db.NVarChar(600)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  payments Payment[]
+
+  @@unique([supplierId, invoiceNumber])
+  @@index([status])
+}
+
+model PurchaseReturn {
+  id          String   @id @default(uuid()) @db.UniqueIdentifier
+  reference   String   @unique @db.NVarChar(40)
+  supplierId  String   @db.UniqueIdentifier
+  supplier    Supplier @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  returnDate  DateTime @default(now())
+  reason      String?  @db.NVarChar(400)
+  totalAmount Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt   DateTime @default(now())
+
+  lines PurchaseReturnLine[]
+}
+
+model PurchaseReturnLine {
+  id               String         @id @default(uuid()) @db.UniqueIdentifier
+  purchaseReturnId String         @db.UniqueIdentifier
+  purchaseReturn   PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  productId        String         @db.UniqueIdentifier
+  product          Product        @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  quantity         Decimal        @db.Decimal(18, 3)
+  unitPrice        Decimal        @db.Decimal(18, 4)
+  lineTotal        Decimal        @db.Decimal(18, 2)
+}
+
+// ---------------------------------------------------------------------------
+// IMPORT & CLEARING - the China -> Mombasa -> warehouse pipeline
+// ---------------------------------------------------------------------------
+
+model ImportOrder {
+  id              String         @id @default(uuid()) @db.UniqueIdentifier
+  reference       String         @unique @db.NVarChar(40) // unique reference number (UCR-linked)
+  supplierId      String         @db.UniqueIdentifier
+  supplier        Supplier       @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  purchaseOrderId String?        @db.UniqueIdentifier
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  orderDate       DateTime       @default(now())
+  stage           String         @default("ORDER_PLACED") @db.NVarChar(30)
+  description     String?        @db.NVarChar(400)
+  currency        String         @default("USD") @db.NVarChar(3)
+  exchangeRate    Decimal        @default(1) @db.Decimal(18, 6)
+  goodsValue      Decimal        @default(0) @db.Decimal(18, 2)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  shipments Shipment[]
+  documents ImportDocument[]
+  charges   LandedCostCharge[]
+
+  @@index([stage])
+}
+
+model Shipment {
+  id              String         @id @default(uuid()) @db.UniqueIdentifier
+  reference       String         @unique @db.NVarChar(40)
+  importOrderId   String         @db.UniqueIdentifier
+  importOrder     ImportOrder    @relation(fields: [importOrderId], references: [id], onDelete: Cascade)
+  containerNumber String?        @db.NVarChar(40)
+  billOfLading    String?        @db.NVarChar(60)
+  vesselName      String?        @db.NVarChar(120)
+  loadingDate     DateTime?
+  departureDate   DateTime?
+  expectedArrival DateTime?
+  actualArrival   DateTime?
+  portOfLoading   String?        @db.NVarChar(120)
+  portOfDischarge String         @default("Mombasa") @db.NVarChar(120)
+  clearingAgentId String?        @db.UniqueIdentifier
+  clearingAgent   ClearingAgent? @relation(fields: [clearingAgentId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  agentNotifiedAt DateTime?
+  releasedAt      DateTime?
+  status          String         @default("PENDING") @db.NVarChar(30)
+  numberOfBales   Int            @default(0)
+  totalWeightKg   Decimal        @default(0) @db.Decimal(18, 3)
+  containerCost   Decimal        @default(0) @db.Decimal(18, 2)
+  notes           String?        @db.NVarChar(600)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  customsEntries CustomsEntry[]
+  goodsReceipts  GoodsReceipt[]
+  charges        LandedCostCharge[]
+  documents      ImportDocument[]
+
+  @@index([importOrderId])
+  @@index([status])
+}
+
+model ClearingAgent {
+  id          String     @id @default(uuid()) @db.UniqueIdentifier
+  code        String     @unique @db.NVarChar(30)
+  name        String     @db.NVarChar(160)
+  contactName String?    @db.NVarChar(120)
+  phone       String?    @db.NVarChar(40)
+  email       String?    @db.NVarChar(160)
+  taxPin      String?    @db.NVarChar(40)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  shipments   Shipment[]
+}
+
+model ImportDocument {
+  id            String      @id @default(uuid()) @db.UniqueIdentifier
+  importOrderId String      @db.UniqueIdentifier
+  importOrder   ImportOrder @relation(fields: [importOrderId], references: [id], onDelete: Cascade)
+  shipmentId    String?     @db.UniqueIdentifier
+  shipment      Shipment?   @relation(fields: [shipmentId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  type          String      @db.NVarChar(30)
+  reference     String?     @db.NVarChar(80) // IDF number, UCR number, permit number
+  issueDate     DateTime?
+  expiryDate    DateTime?
+  fileUrl       String?     @db.NVarChar(400)
+  notes         String?     @db.NVarChar(400)
+  createdAt     DateTime    @default(now())
+
+  @@index([importOrderId])
+  @@index([type])
+}
+
+model CustomsEntry {
+  id             String    @id @default(uuid()) @db.UniqueIdentifier
+  shipmentId     String    @db.UniqueIdentifier
+  shipment       Shipment  @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  entryNumber    String    @db.NVarChar(60)
+  entryDate      DateTime  @default(now())
+  customsValue   Decimal   @default(0) @db.Decimal(18, 2)
+  importDuty     Decimal   @default(0) @db.Decimal(18, 2)
+  vat            Decimal   @default(0) @db.Decimal(18, 2)
+  idfFee         Decimal   @default(0) @db.Decimal(18, 2)
+  railwayLevy    Decimal   @default(0) @db.Decimal(18, 2)
+  importDeclLevy Decimal   @default(0) @db.Decimal(18, 2)
+  exciseDuty     Decimal   @default(0) @db.Decimal(18, 2)
+  otherLevies    Decimal   @default(0) @db.Decimal(18, 2)
+  totalTaxes     Decimal   @default(0) @db.Decimal(18, 2)
+  paidAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([shipmentId])
+}
+
+model LandedCostCharge {
+  id            String      @id @default(uuid()) @db.UniqueIdentifier
+  importOrderId String      @db.UniqueIdentifier
+  importOrder   ImportOrder @relation(fields: [importOrderId], references: [id], onDelete: Cascade)
+  shipmentId    String?     @db.UniqueIdentifier
+  shipment      Shipment?   @relation(fields: [shipmentId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  category      String      @db.NVarChar(30)
+  description   String      @db.NVarChar(300)
+  currency      String      @default("KES") @db.NVarChar(3)
+  exchangeRate  Decimal     @default(1) @db.Decimal(18, 6)
+  amount        Decimal     @db.Decimal(18, 2)
+  amountKes     Decimal     @db.Decimal(18, 2)
+  chargeDate    DateTime    @default(now())
+  isPaid        Boolean     @default(false)
+  payeeName     String?     @db.NVarChar(160)
+  reference     String?     @db.NVarChar(80)
+  createdAt     DateTime    @default(now())
+
+  @@index([importOrderId])
+  @@index([category])
+}
+
+// ---------------------------------------------------------------------------
+// INVENTORY - products, bales, warehouses, stock
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String    @id @default(uuid()) @db.UniqueIdentifier
+  name        String    @unique @db.NVarChar(120)
+  description String?   @db.NVarChar(300)
+  createdAt   DateTime  @default(now())
+  products    Product[]
+}
+
+model Product {
+  id           String    @id @default(uuid()) @db.UniqueIdentifier
+  sku          String    @unique @db.NVarChar(40)
+  barcode      String?   @db.NVarChar(60)
+  name         String    @db.NVarChar(200)
+  description  String?   @db.NVarChar(500)
+  categoryId   String?   @db.UniqueIdentifier
+  category     Category? @relation(fields: [categoryId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  unit         String    @default("PIECE") @db.NVarChar(30)
+  costPrice    Decimal   @default(0) @db.Decimal(18, 4) // weighted average landed cost
+  sellingPrice Decimal   @default(0) @db.Decimal(18, 2)
+  reorderLevel Decimal   @default(0) @db.Decimal(18, 3)
+  taxRate      Decimal   @default(0) @db.Decimal(5, 2) // VAT %
+  isActive     Boolean   @default(true)
+  imageUrl     String?   @db.NVarChar(400)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  stockLevels     StockLevel[]
+  saleLines       SaleLine[]
+  poLines         PurchaseOrderLine[]
+  movements       StockMovement[]
+  bales           Bale[]
+  returnLines     SalesReturnLine[]
+  purchaseReturns PurchaseReturnLine[]
+  adjustmentLines StockAdjustmentLine[]
+  transferLines   StockTransferLine[]
+  stockTakeLines  StockTakeLine[]
+  grnLines        GoodsReceiptLine[]
+
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+model Warehouse {
+  id        String   @id @default(uuid()) @db.UniqueIdentifier
+  code      String   @unique @db.NVarChar(20)
+  name      String   @db.NVarChar(120)
+  location  String?  @db.NVarChar(200)
+  branchId  String?  @db.UniqueIdentifier
+  branch    Branch?  @relation(fields: [branchId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  stockLevels   StockLevel[]
+  movements     StockMovement[]
+  goodsReceipts GoodsReceipt[]
+  transfersFrom StockTransfer[]   @relation("TransferFrom")
+  transfersTo   StockTransfer[]   @relation("TransferTo")
+  adjustments   StockAdjustment[]
+  stockTakes    StockTake[]
+  bales         Bale[]
+}
+
+model StockLevel {
+  id          String    @id @default(uuid()) @db.UniqueIdentifier
+  productId   String    @db.UniqueIdentifier
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouseId String    @db.UniqueIdentifier
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  quantity    Decimal   @default(0) @db.Decimal(18, 3)
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([productId, warehouseId])
+  @@index([warehouseId])
+}
+
+model StockMovement {
+  id           String    @id @default(uuid()) @db.UniqueIdentifier
+  productId    String    @db.UniqueIdentifier
+  product      Product   @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  warehouseId  String    @db.UniqueIdentifier
+  warehouse    Warehouse @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  type         String    @db.NVarChar(30)
+  quantity     Decimal   @db.Decimal(18, 3) // signed: + in, - out
+  balanceAfter Decimal   @default(0) @db.Decimal(18, 3)
+  unitCost     Decimal   @default(0) @db.Decimal(18, 4)
+  reference    String?   @db.NVarChar(80)
+  sourceType   String?   @db.NVarChar(60)
+  sourceId     String?   @db.NVarChar(80)
+  userId       String?   @db.UniqueIdentifier
+  user         User?     @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  notes        String?   @db.NVarChar(300)
+  createdAt    DateTime  @default(now())
+
+  @@index([productId, createdAt])
+  @@index([warehouseId])
+  @@index([type])
+}
+
+// Goods receiving - bale-level detail required by the spec
+model GoodsReceipt {
+  id              String    @id @default(uuid()) @db.UniqueIdentifier
+  reference       String    @unique @db.NVarChar(40) // GRN number
+  shipmentId      String?   @db.UniqueIdentifier
+  shipment        Shipment? @relation(fields: [shipmentId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  warehouseId     String    @db.UniqueIdentifier
+  warehouse       Warehouse @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  receiptDate     DateTime  @default(now())
+  containerNumber String?   @db.NVarChar(40)
+  numberOfBales   Int       @default(0)
+  totalWeightKg   Decimal   @default(0) @db.Decimal(18, 3)
+  containerCost   Decimal   @default(0) @db.Decimal(18, 2)
+  offloadingCost  Decimal   @default(0) @db.Decimal(18, 2)
+  transportCost   Decimal   @default(0) @db.Decimal(18, 2)
+  warehouseCost   Decimal   @default(0) @db.Decimal(18, 2)
+  verifiedBy      String?   @db.NVarChar(140)
+  notes           String?   @db.NVarChar(600)
+  isPosted        Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  bales Bale[]
+  lines GoodsReceiptLine[]
+
+  @@index([shipmentId])
+}
+
+model GoodsReceiptLine {
+  id             String       @id @default(uuid()) @db.UniqueIdentifier
+  goodsReceiptId String       @db.UniqueIdentifier
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  productId      String       @db.UniqueIdentifier
+  product        Product      @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  quantity       Decimal      @db.Decimal(18, 3)
+  unitCost       Decimal      @db.Decimal(18, 4)
+  lineTotal      Decimal      @db.Decimal(18, 2)
+
+  @@index([goodsReceiptId])
+}
+
+// A physical bale of shoes - the unit the business actually receives
+model Bale {
+  id             String       @id @default(uuid()) @db.UniqueIdentifier
+  baleNumber     String       @unique @db.NVarChar(40)
+  goodsReceiptId String       @db.UniqueIdentifier
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  warehouseId    String       @db.UniqueIdentifier
+  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  productId      String?      @db.UniqueIdentifier
+  product        Product?     @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  shoeType       String       @db.NVarChar(140) // bale type of shoes
+  weightKg       Decimal      @db.Decimal(18, 3)
+  balePrice      Decimal      @db.Decimal(18, 2) // purchase price of the bale
+  landedCost     Decimal      @default(0) @db.Decimal(18, 2)
+  piecesEstimate Int          @default(0)
+  piecesSold     Int          @default(0)
+  isOpened       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([goodsReceiptId])
+  @@index([warehouseId])
+}
+
+model StockTransfer {
+  id              String    @id @default(uuid()) @db.UniqueIdentifier
+  reference       String    @unique @db.NVarChar(40)
+  fromWarehouseId String    @db.UniqueIdentifier
+  fromWarehouse   Warehouse @relation("TransferFrom", fields: [fromWarehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  toWarehouseId   String    @db.UniqueIdentifier
+  toWarehouse     Warehouse @relation("TransferTo", fields: [toWarehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  transferDate    DateTime  @default(now())
+  status          String    @default("DRAFT") @db.NVarChar(30)
+  createdById     String?   @db.UniqueIdentifier
+  createdBy       User?     @relation("TransferCreatedBy", fields: [createdById], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  notes           String?   @db.NVarChar(400)
+  createdAt       DateTime  @default(now())
+
+  lines StockTransferLine[]
+}
+
+model StockTransferLine {
+  id         String        @id @default(uuid()) @db.UniqueIdentifier
+  transferId String        @db.UniqueIdentifier
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  String        @db.UniqueIdentifier
+  product    Product       @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  quantity   Decimal       @db.Decimal(18, 3)
+}
+
+model StockAdjustment {
+  id             String    @id @default(uuid()) @db.UniqueIdentifier
+  reference      String    @unique @db.NVarChar(40)
+  warehouseId    String    @db.UniqueIdentifier
+  warehouse      Warehouse @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  reason         String    @db.NVarChar(30)
+  adjustmentDate DateTime  @default(now())
+  status         String    @default("PENDING") @db.NVarChar(30)
+  userId         String?   @db.UniqueIdentifier
+  user           User?     @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  notes          String?   @db.NVarChar(400)
+  createdAt      DateTime  @default(now())
+
+  lines StockAdjustmentLine[]
+}
+
+model StockAdjustmentLine {
+  id           String          @id @default(uuid()) @db.UniqueIdentifier
+  adjustmentId String          @db.UniqueIdentifier
+  adjustment   StockAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  productId    String          @db.UniqueIdentifier
+  product      Product         @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  quantity     Decimal         @db.Decimal(18, 3) // signed
+  unitCost     Decimal         @default(0) @db.Decimal(18, 4)
+}
+
+model StockTake {
+  id          String    @id @default(uuid()) @db.UniqueIdentifier
+  reference   String    @unique @db.NVarChar(40)
+  warehouseId String    @db.UniqueIdentifier
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  takeDate    DateTime  @default(now())
+  status      String    @default("OPEN") @db.NVarChar(30)
+  userId      String?   @db.UniqueIdentifier
+  user        User?     @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  notes       String?   @db.NVarChar(400)
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  lines StockTakeLine[]
+}
+
+model StockTakeLine {
+  id          String    @id @default(uuid()) @db.UniqueIdentifier
+  stockTakeId String    @db.UniqueIdentifier
+  stockTake   StockTake @relation(fields: [stockTakeId], references: [id], onDelete: Cascade)
+  productId   String    @db.UniqueIdentifier
+  product     Product   @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  systemQty   Decimal   @db.Decimal(18, 3)
+  countedQty  Decimal   @db.Decimal(18, 3)
+  variance    Decimal   @db.Decimal(18, 3)
+}
+
+// ---------------------------------------------------------------------------
+// SALES & POS
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id          String   @id @default(uuid()) @db.UniqueIdentifier
+  code        String   @unique @db.NVarChar(30)
+  name        String   @db.NVarChar(160)
+  phone       String?  @db.NVarChar(40)
+  email       String?  @db.NVarChar(160)
+  address     String?  @db.NVarChar(300)
+  taxPin      String?  @db.NVarChar(40)
+  creditLimit Decimal  @default(0) @db.Decimal(18, 2)
+  balance     Decimal  @default(0) @db.Decimal(18, 2) // outstanding receivable
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sales    Sale[]
+  receipts Receipt[]
+  returns  SalesReturn[]
+
+  @@index([isActive])
+}
+
+model Sale {
+  id            String       @id @default(uuid()) @db.UniqueIdentifier
+  reference     String       @unique @db.NVarChar(40) // receipt / invoice number
+  channel       String       @default("POS") @db.NVarChar(30)
+  customerId    String?      @db.UniqueIdentifier
+  customer      Customer?    @relation(fields: [customerId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  branchId      String?      @db.UniqueIdentifier
+  branch        Branch?      @relation(fields: [branchId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  cashierId     String       @db.UniqueIdentifier
+  cashier       User         @relation(fields: [cashierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  cashSessionId String?      @db.UniqueIdentifier
+  cashSession   CashSession? @relation(fields: [cashSessionId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  saleDate      DateTime     @default(now())
+  subtotal      Decimal      @default(0) @db.Decimal(18, 2)
+  discount      Decimal      @default(0) @db.Decimal(18, 2)
+  taxAmount     Decimal      @default(0) @db.Decimal(18, 2)
+  total         Decimal      @default(0) @db.Decimal(18, 2)
+  amountPaid    Decimal      @default(0) @db.Decimal(18, 2)
+  changeGiven   Decimal      @default(0) @db.Decimal(18, 2)
+  costOfSale    Decimal      @default(0) @db.Decimal(18, 2) // for profit reporting
+  status        String       @default("COMPLETED") @db.NVarChar(30)
+  isCredit      Boolean      @default(false)
+  dueDate       DateTime?
+  notes         String?      @db.NVarChar(400)
+  voidReason    String?      @db.NVarChar(300)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  lines    SaleLine[]
+  receipts Receipt[]
+  returns  SalesReturn[]
+
+  @@index([saleDate])
+  @@index([customerId])
+  @@index([status])
+  @@index([cashierId])
+}
+
+model SaleLine {
+  id          String  @id @default(uuid()) @db.UniqueIdentifier
+  saleId      String  @db.UniqueIdentifier
+  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId   String  @db.UniqueIdentifier
+  product     Product @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  description String  @db.NVarChar(300)
+  quantity    Decimal @db.Decimal(18, 3)
+  unitPrice   Decimal @db.Decimal(18, 2)
+  discount    Decimal @default(0) @db.Decimal(18, 2)
+  taxRate     Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount   Decimal @default(0) @db.Decimal(18, 2)
+  unitCost    Decimal @default(0) @db.Decimal(18, 4)
+  lineTotal   Decimal @db.Decimal(18, 2)
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model SalesReturn {
+  id          String    @id @default(uuid()) @db.UniqueIdentifier
+  reference   String    @unique @db.NVarChar(40)
+  saleId      String?   @db.UniqueIdentifier
+  sale        Sale?     @relation(fields: [saleId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  customerId  String?   @db.UniqueIdentifier
+  customer    Customer? @relation(fields: [customerId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  returnDate  DateTime  @default(now())
+  reason      String?   @db.NVarChar(400)
+  totalAmount Decimal   @default(0) @db.Decimal(18, 2)
+  isRestocked Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  lines SalesReturnLine[]
+
+  @@index([saleId])
+}
+
+model SalesReturnLine {
+  id            String      @id @default(uuid()) @db.UniqueIdentifier
+  salesReturnId String      @db.UniqueIdentifier
+  salesReturn   SalesReturn @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  productId     String      @db.UniqueIdentifier
+  product       Product     @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  quantity      Decimal     @db.Decimal(18, 3)
+  unitPrice     Decimal     @db.Decimal(18, 2)
+  lineTotal     Decimal     @db.Decimal(18, 2)
+}
+
+// ---------------------------------------------------------------------------
+// FINANCE - receipts (money in), payments (money out), cash, expenses
+// ---------------------------------------------------------------------------
+
+// Money received from customers
+model Receipt {
+  id            String       @id @default(uuid()) @db.UniqueIdentifier
+  reference     String       @unique @db.NVarChar(40)
+  customerId    String?      @db.UniqueIdentifier
+  customer      Customer?    @relation(fields: [customerId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  saleId        String?      @db.UniqueIdentifier
+  sale          Sale?        @relation(fields: [saleId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  cashSessionId String?      @db.UniqueIdentifier
+  cashSession   CashSession? @relation(fields: [cashSessionId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  method        String       @db.NVarChar(30)
+  status        String       @default("COMPLETED") @db.NVarChar(30)
+  amount        Decimal      @db.Decimal(18, 2)
+  receiptDate   DateTime     @default(now())
+  mpesaCode     String?      @db.NVarChar(40)
+  bankReference String?      @db.NVarChar(80)
+  userId        String?      @db.UniqueIdentifier
+  user          User?        @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  notes         String?      @db.NVarChar(400)
+  createdAt     DateTime     @default(now())
+
+  @@index([customerId])
+  @@index([receiptDate])
+  @@index([status])
+}
+
+// Money paid out to suppliers, agents, KRA
+model Payment {
+  id                String           @id @default(uuid()) @db.UniqueIdentifier
+  reference         String           @unique @db.NVarChar(40)
+  payeeType         String           @default("SUPPLIER") @db.NVarChar(30)
+  supplierId        String?          @db.UniqueIdentifier
+  supplier          Supplier?        @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  payeeName         String?          @db.NVarChar(160)
+  supplierInvoiceId String?          @db.UniqueIdentifier
+  supplierInvoice   SupplierInvoice? @relation(fields: [supplierInvoiceId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  method            String           @db.NVarChar(30)
+  status            String           @default("COMPLETED") @db.NVarChar(30)
+  isDeposit         Boolean          @default(false)
+  currency          String           @default("KES") @db.NVarChar(3)
+  exchangeRate      Decimal          @default(1) @db.Decimal(18, 6)
+  amount            Decimal          @db.Decimal(18, 2)
+  amountKes         Decimal          @db.Decimal(18, 2)
+  paymentDate       DateTime         @default(now())
+  bankReference     String?          @db.NVarChar(80)
+  mpesaCode         String?          @db.NVarChar(40)
+  userId            String?          @db.UniqueIdentifier
+  user              User?            @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  notes             String?          @db.NVarChar(400)
+  createdAt         DateTime         @default(now())
+
+  @@index([supplierId])
+  @@index([paymentDate])
+}
+
+model ExpenseCategory {
+  id        String    @id @default(uuid()) @db.UniqueIdentifier
+  name      String    @unique @db.NVarChar(120)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  expenses  Expense[]
+}
+
+model Expense {
+  id            String          @id @default(uuid()) @db.UniqueIdentifier
+  reference     String          @unique @db.NVarChar(40)
+  categoryId    String          @db.UniqueIdentifier
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  description   String          @db.NVarChar(400)
+  amount        Decimal         @db.Decimal(18, 2)
+  method        String          @default("CASH") @db.NVarChar(30)
+  expenseDate   DateTime        @default(now())
+  payeeName     String?         @db.NVarChar(160)
+  status        String          @default("APPROVED") @db.NVarChar(30)
+  userId        String?         @db.UniqueIdentifier
+  user          User?           @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  attachmentUrl String?         @db.NVarChar(400)
+  createdAt     DateTime        @default(now())
+
+  @@index([expenseDate])
+  @@index([categoryId])
+}
+
+model CashSession {
+  id           String    @id @default(uuid()) @db.UniqueIdentifier
+  reference    String    @unique @db.NVarChar(40)
+  userId       String    @db.UniqueIdentifier
+  user         User      @relation(fields: [userId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  openingFloat Decimal   @default(0) @db.Decimal(18, 2)
+  closingCount Decimal?  @db.Decimal(18, 2)
+  expectedCash Decimal   @default(0) @db.Decimal(18, 2)
+  variance     Decimal   @default(0) @db.Decimal(18, 2)
+  status       String    @default("OPEN") @db.NVarChar(30)
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+  notes        String?   @db.NVarChar(400)
+
+  sales    Sale[]
+  receipts Receipt[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// M-PESA STK push / C2B tracking
+model MpesaTransaction {
+  id                String   @id @default(uuid()) @db.UniqueIdentifier
+  merchantRequestId String?  @db.NVarChar(80)
+  checkoutRequestId String?  @db.NVarChar(80)
+  mpesaReceipt      String?  @db.NVarChar(40)
+  phoneNumber       String   @db.NVarChar(30)
+  amount            Decimal  @db.Decimal(18, 2)
+  accountReference  String?  @db.NVarChar(60)
+  saleId            String?  @db.UniqueIdentifier
+  status            String   @default("PENDING") @db.NVarChar(30)
+  resultCode        Int?
+  resultDesc        String?  @db.NVarChar(300)
+  rawCallback       String?  @db.NVarChar(Max)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+  @@index([saleId])
+}
