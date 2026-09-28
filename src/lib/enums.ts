@@ -1,6 +1,6 @@
 // Generated from prisma/schema.prisma.
-// SQL Server has no native Prisma enums, so these values are stored as
-// NVarChar(30). These constants are the single source of truth for them.
+// These values are stored as VarChar(30) columns (kept portable rather than
+// native PostgreSQL enums). These constants are the single source of truth for them.
 
 export const ApprovalStatus = {
   PENDING: 'PENDING',

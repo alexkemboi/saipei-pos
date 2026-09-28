@@ -41,8 +41,8 @@ export default async function ImportDocumentsPage({
   if (params.type) where.type = params.type
   if (params.q) {
     where.OR = [
-      { reference: { contains: params.q } },
-      { importOrder: { reference: { contains: params.q } } },
+      { reference: { contains: params.q, mode: 'insensitive' } },
+      { importOrder: { reference: { contains: params.q, mode: 'insensitive' } } },
     ]
   }
 

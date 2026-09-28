@@ -96,7 +96,10 @@ export async function authenticate(
   const user = await db.user.findFirst({
     where: {
       isActive: true,
-      OR: [{ username }, { email: username }],
+      OR: [
+        { username: { equals: username, mode: 'insensitive' } },
+        { email: { equals: username, mode: 'insensitive' } },
+      ],
     },
     include: {
       role: { include: { permissions: { include: { permission: true } } } },

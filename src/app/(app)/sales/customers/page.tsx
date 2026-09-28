@@ -27,9 +27,9 @@ export default async function CustomersPage({
   const where: Record<string, unknown> = {}
   if (params.q) {
     where.OR = [
-      { name: { contains: params.q } },
-      { code: { contains: params.q } },
-      { phone: { contains: params.q } },
+      { name: { contains: params.q, mode: 'insensitive' } },
+      { code: { contains: params.q, mode: 'insensitive' } },
+      { phone: { contains: params.q, mode: 'insensitive' } },
     ]
   }
   if (params.standing === 'owing') where.balance = { gt: 0 }

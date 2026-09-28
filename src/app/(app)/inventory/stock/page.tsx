@@ -31,7 +31,7 @@ export default async function StockPage({
       where: {
         isActive: true,
         ...(params.q
-          ? { OR: [{ name: { contains: params.q } }, { sku: { contains: params.q } }] }
+          ? { OR: [{ name: { contains: params.q, mode: 'insensitive' } }, { sku: { contains: params.q, mode: 'insensitive' } }] }
           : {}),
       },
       orderBy: { name: 'asc' },

@@ -30,8 +30,8 @@ export default async function CreditSalesPage({
   }
   if (params.q) {
     where.OR = [
-      { reference: { contains: params.q } },
-      { customer: { name: { contains: params.q } } },
+      { reference: { contains: params.q, mode: 'insensitive' } },
+      { customer: { name: { contains: params.q, mode: 'insensitive' } } },
     ]
   }
 

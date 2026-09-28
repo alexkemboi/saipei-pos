@@ -26,10 +26,10 @@ export default async function ShipmentsPage({
   if (params.status) where.status = params.status
   if (params.q) {
     where.OR = [
-      { reference: { contains: params.q } },
-      { containerNumber: { contains: params.q } },
-      { billOfLading: { contains: params.q } },
-      { vesselName: { contains: params.q } },
+      { reference: { contains: params.q, mode: 'insensitive' } },
+      { containerNumber: { contains: params.q, mode: 'insensitive' } },
+      { billOfLading: { contains: params.q, mode: 'insensitive' } },
+      { vesselName: { contains: params.q, mode: 'insensitive' } },
     ]
   }
 

@@ -29,9 +29,9 @@ export default async function ExpensesPage({
   if (params.method) where.method = params.method
   if (params.q) {
     where.OR = [
-      { reference: { contains: params.q } },
-      { description: { contains: params.q } },
-      { payeeName: { contains: params.q } },
+      { reference: { contains: params.q, mode: 'insensitive' } },
+      { description: { contains: params.q, mode: 'insensitive' } },
+      { payeeName: { contains: params.q, mode: 'insensitive' } },
     ]
   }
   if (params.from || params.to) {

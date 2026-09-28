@@ -39,8 +39,8 @@ export default async function AuditPage({
   if (params.userId) where.userId = params.userId
   if (params.q) {
     where.OR = [
-      { summary: { contains: params.q } },
-      { entityId: { contains: params.q } },
+      { summary: { contains: params.q, mode: 'insensitive' } },
+      { entityId: { contains: params.q, mode: 'insensitive' } },
     ]
   }
   if (params.from || params.to) {

@@ -28,9 +28,9 @@ export default async function ReceiptsPage({
   if (params.status) where.status = params.status
   if (params.q) {
     where.OR = [
-      { reference: { contains: params.q } },
-      { mpesaCode: { contains: params.q } },
-      { customer: { name: { contains: params.q } } },
+      { reference: { contains: params.q, mode: 'insensitive' } },
+      { mpesaCode: { contains: params.q, mode: 'insensitive' } },
+      { customer: { name: { contains: params.q, mode: 'insensitive' } } },
     ]
   }
   if (params.from || params.to) {

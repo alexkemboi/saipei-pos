@@ -28,9 +28,9 @@ export default async function BalesPage({
   if (params.opened === 'no') where.isOpened = false
   if (params.q) {
     where.OR = [
-      { baleNumber: { contains: params.q } },
-      { shoeType: { contains: params.q } },
-      { goodsReceipt: { containerNumber: { contains: params.q } } },
+      { baleNumber: { contains: params.q, mode: 'insensitive' } },
+      { shoeType: { contains: params.q, mode: 'insensitive' } },
+      { goodsReceipt: { containerNumber: { contains: params.q, mode: 'insensitive' } } },
     ]
   }
 

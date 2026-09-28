@@ -30,9 +30,9 @@ export default async function ProductsPage({
   if (params.active === 'no') where.isActive = false
   if (params.q) {
     where.OR = [
-      { name: { contains: params.q } },
-      { sku: { contains: params.q } },
-      { barcode: { contains: params.q } },
+      { name: { contains: params.q, mode: 'insensitive' } },
+      { sku: { contains: params.q, mode: 'insensitive' } },
+      { barcode: { contains: params.q, mode: 'insensitive' } },
     ]
   }
 

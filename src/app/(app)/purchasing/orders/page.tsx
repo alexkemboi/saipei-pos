@@ -29,8 +29,8 @@ export default async function PurchaseOrdersPage({
   if (params.supplierId) where.supplierId = params.supplierId
   if (params.q) {
     where.OR = [
-      { reference: { contains: params.q } },
-      { supplier: { name: { contains: params.q } } },
+      { reference: { contains: params.q, mode: 'insensitive' } },
+      { supplier: { name: { contains: params.q, mode: 'insensitive' } } },
     ]
   }
 

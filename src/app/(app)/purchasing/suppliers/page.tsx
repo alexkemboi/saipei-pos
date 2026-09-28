@@ -30,9 +30,9 @@ export default async function SuppliersPage({
   if (params.active === 'no') where.isActive = false
   if (params.q) {
     where.OR = [
-      { name: { contains: params.q } },
-      { code: { contains: params.q } },
-      { country: { contains: params.q } },
+      { name: { contains: params.q, mode: 'insensitive' } },
+      { code: { contains: params.q, mode: 'insensitive' } },
+      { country: { contains: params.q, mode: 'insensitive' } },
     ]
   }
 

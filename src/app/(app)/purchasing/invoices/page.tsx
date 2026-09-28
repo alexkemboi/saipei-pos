@@ -29,8 +29,8 @@ export default async function SupplierInvoicesPage({
   if (params.supplierId) where.supplierId = params.supplierId
   if (params.q) {
     where.OR = [
-      { invoiceNumber: { contains: params.q } },
-      { supplier: { name: { contains: params.q } } },
+      { invoiceNumber: { contains: params.q, mode: 'insensitive' } },
+      { supplier: { name: { contains: params.q, mode: 'insensitive' } } },
     ]
   }
 

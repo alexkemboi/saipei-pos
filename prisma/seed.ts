@@ -1,29 +1,11 @@
 import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
-import { PrismaMssql } from '@prisma/adapter-mssql'
+import { PrismaPg } from '@prisma/adapter-pg'
 import bcrypt from 'bcryptjs'
 import { PERMISSIONS, ROLE_TEMPLATES } from '../src/lib/permissions.ts'
 
-function parseUrl(url: string) {
-  const [hostPart, ...pairs] = url.replace(/^sqlserver:\/\//, '').split(';')
-  const [server, port] = hostPart.split(':')
-  const params = new Map<string, string>()
-  for (const pair of pairs) {
-    const i = pair.indexOf('=')
-    if (i > 0) params.set(pair.slice(0, i).toLowerCase(), pair.slice(i + 1))
-  }
-  return {
-    server,
-    port: port ? Number(port) : 1433,
-    database: params.get('database'),
-    user: params.get('user'),
-    password: params.get('password'),
-    options: { encrypt: true, trustServerCertificate: true },
-  }
-}
-
 const db = new PrismaClient({
-  adapter: new PrismaMssql(parseUrl(process.env.DATABASE_URL!)),
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 })
 
 async function main() {
